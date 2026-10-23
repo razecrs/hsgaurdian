@@ -12,15 +12,24 @@ use crate::{
         ModuleInfo, ProcessInfo, ProcessMemory, format_hex, list_modules, list_processes,
         parse_address, parse_hex_bytes, parse_offsets,
     },
+    scan::{ScanHit, ScanMode, ValueType, first_scan, next_scan},
     windissect::{LoadedIr, Xref, default_executable, emit_artifacts, extract_ir},
 };
 
 const ACCENT: Color32 = Color32::from_rgb(83, 214, 151);
+const ACCENT_ALT: Color32 = Color32::from_rgb(126, 108, 255);
 const WARNING: Color32 = Color32::from_rgb(245, 192, 88);
 const ERROR: Color32 = Color32::from_rgb(244, 92, 92);
+const CANVAS: Color32 = Color32::from_rgb(8, 11, 16);
+const PANEL: Color32 = Color32::from_rgb(12, 16, 23);
+const SURFACE: Color32 = Color32::from_rgb(18, 24, 33);
+const SURFACE_HOVER: Color32 = Color32::from_rgb(25, 33, 44);
+const BORDER: Color32 = Color32::from_rgb(39, 49, 63);
+const MUTED: Color32 = Color32::from_rgb(137, 149, 166);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
+    Scan,
     Live,
     Pointer,
     Windissect,
@@ -48,6 +57,15 @@ pub struct GuardianApp {
     status: String,
     status_error: bool,
 
+    scan_type: ValueType,
+    scan_mode: ScanMode,
+    scan_value: String,
+    scan_edit_value: String,
+    scan_limit: usize,
+    scan_results: Vec<ScanHit>,
+    selected_scan_result: Option<usize>,
+    scan_rx: Option<Receiver<Result<Vec<ScanHit>, String>>>,
+
     address_text: String,
     disassembly_size: usize,
     bitness: u32,
@@ -73,21 +91,106 @@ pub struct GuardianApp {
 }
 
 impl GuardianApp {
+    fn page_header(ui: &mut egui::Ui, kicker: &str, title: &str, subtitle: &str) {
+        ui.label(RichText::new(kicker).size(11.0).strong().color(ACCENT));
+        ui.label(RichText::new(title).size(25.0).strong());
+        ui.label(RichText::new(subtitle).color(MUTED));
+        ui.add_space(8.0);
+    }
+
+    fn tab_button(ui: &mut egui::Ui, current: &mut Tab, tab: Tab, label: &str) {
+        let selected = *current == tab;
+        let button = egui::Button::new(RichText::new(label).strong().color(if selected {
+            Color32::BLACK
+        } else {
+            MUTED
+        }))
+        .fill(if selected {
+            ACCENT
+        } else {
+            Color32::TRANSPARENT
+        })
+        .stroke(if selected {
+            egui::Stroke::NONE
+        } else {
+            egui::Stroke::new(1.0_f32, Color32::TRANSPARENT)
+        })
+        .corner_radius(9);
+        if ui.add(button).clicked() {
+            *current = tab;
+        }
+    }
+
     pub fn new(context: &eframe::CreationContext<'_>) -> Self {
         let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = Color32::from_rgb(16, 19, 24);
-        visuals.window_fill = Color32::from_rgb(20, 24, 30);
-        visuals.selection.bg_fill = Color32::from_rgb(39, 91, 72);
-        context.egui_ctx.set_visuals(visuals);
+        visuals.panel_fill = CANVAS;
+        visuals.window_fill = SURFACE;
+        visuals.window_stroke = egui::Stroke::new(1.0_f32, BORDER);
+        visuals.window_corner_radius = egui::CornerRadius::same(12);
+        visuals.menu_corner_radius = egui::CornerRadius::same(10);
+        visuals.extreme_bg_color = Color32::from_rgb(10, 14, 20);
+        visuals.text_edit_bg_color = Some(Color32::from_rgb(11, 15, 22));
+        visuals.faint_bg_color = Color32::from_rgb(16, 21, 29);
+        visuals.code_bg_color = Color32::from_rgb(10, 14, 20);
+        visuals.selection.bg_fill = Color32::from_rgb(35, 92, 72);
+        visuals.selection.stroke = egui::Stroke::new(1.0_f32, ACCENT);
+        visuals.hyperlink_color = ACCENT;
+        visuals.warn_fg_color = WARNING;
+        visuals.error_fg_color = ERROR;
+        visuals.weak_text_color = Some(MUTED);
+        visuals.widgets.inactive.bg_fill = SURFACE;
+        visuals.widgets.inactive.weak_bg_fill = SURFACE;
+        visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, BORDER);
+        visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(8);
+        visuals.widgets.hovered.bg_fill = SURFACE_HOVER;
+        visuals.widgets.hovered.weak_bg_fill = SURFACE_HOVER;
+        visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, ACCENT);
+        visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(8);
+        visuals.widgets.active.bg_fill = Color32::from_rgb(34, 79, 66);
+        visuals.widgets.active.weak_bg_fill = Color32::from_rgb(34, 79, 66);
+        visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, ACCENT);
+        visuals.widgets.active.corner_radius = egui::CornerRadius::same(8);
+        visuals.widgets.open.bg_fill = SURFACE_HOVER;
+        visuals.widgets.open.weak_bg_fill = SURFACE_HOVER;
+        visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0_f32, ACCENT_ALT);
+        visuals.widgets.open.corner_radius = egui::CornerRadius::same(8);
+        visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
+
+        let mut style = (*context.egui_ctx.style()).clone();
+        style.visuals = visuals;
+        style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+        style.spacing.button_padding = egui::vec2(12.0, 7.0);
+        style.spacing.interact_size.y = 32.0;
+        style.text_styles.insert(
+            egui::TextStyle::Heading,
+            egui::FontId::new(24.0, egui::FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Button,
+            egui::FontId::new(14.0, egui::FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Monospace,
+            egui::FontId::new(13.0, egui::FontFamily::Monospace),
+        );
+        context.egui_ctx.set_style(style);
 
         let processes = list_processes().unwrap_or_default();
         Self {
-            tab: Tab::Live,
+            tab: Tab::Scan,
             processes,
             process_filter: String::new(),
             attached: None,
             status: "Select a process to begin".into(),
             status_error: false,
+            scan_type: ValueType::I32,
+            scan_mode: ScanMode::Exact,
+            scan_value: String::new(),
+            scan_edit_value: String::new(),
+            scan_limit: 100_000,
+            scan_results: Vec::new(),
+            selected_scan_result: None,
+            scan_rx: None,
             address_text: String::new(),
             disassembly_size: 384,
             bitness: 64,
@@ -143,6 +246,9 @@ impl GuardianApp {
                             selected_module: 0,
                         });
                         self.loaded_ir = None;
+                        self.scan_rx = None;
+                        self.scan_results.clear();
+                        self.selected_scan_result = None;
                         self.disassembly.clear();
                         self.xrefs.clear();
                         self.set_status(
@@ -300,6 +406,122 @@ impl GuardianApp {
         }
     }
 
+    fn start_first_scan(&mut self) {
+        let Some(pid) = self.attached.as_ref().map(|attached| attached.info.pid) else {
+            self.set_status("attach to a process first", true);
+            return;
+        };
+        let value = match self.scan_type.parse(&self.scan_value) {
+            Ok(value) => value,
+            Err(error) => {
+                self.set_status(error, true);
+                return;
+            }
+        };
+        let value_type = self.scan_type;
+        let limit = self.scan_limit;
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = sender.send(first_scan(pid, value_type, &value, limit));
+        });
+        self.scan_rx = Some(receiver);
+        self.scan_results.clear();
+        self.selected_scan_result = None;
+        self.set_status(
+            format!("Scanning process {pid} for {}…", self.scan_value),
+            false,
+        );
+    }
+
+    fn start_next_scan(&mut self) {
+        let Some(pid) = self.attached.as_ref().map(|attached| attached.info.pid) else {
+            self.set_status("attach to a process first", true);
+            return;
+        };
+        if self.scan_results.is_empty() {
+            self.set_status("run a first scan before refining results", true);
+            return;
+        }
+        let exact = if self.scan_mode == ScanMode::Exact {
+            match self.scan_type.parse(&self.scan_value) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    self.set_status(error, true);
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+        let hits = self.scan_results.clone();
+        let value_type = self.scan_type;
+        let mode = self.scan_mode;
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = sender.send(next_scan(pid, value_type, hits, mode, exact));
+        });
+        self.scan_rx = Some(receiver);
+        self.selected_scan_result = None;
+        self.set_status(format!("Refining with {}…", mode.label()), false);
+    }
+
+    fn poll_scan(&mut self) {
+        let result = self
+            .scan_rx
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        let Some(result) = result else {
+            return;
+        };
+        self.scan_rx = None;
+        match result {
+            Ok(results) => {
+                let count = results.len();
+                self.scan_results = results;
+                self.set_status(format!("Scan complete · {count} results"), false);
+            }
+            Err(error) => self.set_status(error, true),
+        }
+    }
+
+    fn write_scan_result(&mut self) {
+        let result = (|| {
+            let index = self
+                .selected_scan_result
+                .ok_or_else(|| "select a scan result first".to_owned())?;
+            let hit = self
+                .scan_results
+                .get(index)
+                .ok_or_else(|| "the selected result no longer exists".to_owned())?;
+            let address = hit.address;
+            let replacement = self.scan_type.parse(&self.scan_edit_value)?;
+            let attached = self
+                .attached
+                .as_ref()
+                .ok_or_else(|| "attach to a process first".to_owned())?;
+            let original = attached
+                .memory
+                .patch(address, &replacement)
+                .map_err(|error| format!("write failed: {error}"))?;
+            Ok::<_, String>((index, address, original, replacement))
+        })();
+
+        match result {
+            Ok((index, address, original, replacement)) => {
+                self.patches.push(PatchRecord {
+                    address,
+                    original: original.clone(),
+                    replacement: replacement.clone(),
+                    active: true,
+                });
+                self.scan_results[index].previous = original;
+                self.scan_results[index].current = replacement;
+                self.set_status(format!("Wrote value at 0x{address:X}"), false);
+            }
+            Err(error) => self.set_status(error, true),
+        }
+    }
+
     fn start_ir_load(&mut self, path: PathBuf) {
         let Some(module) = self.selected_module().cloned() else {
             self.set_status("select an attached module first", true);
@@ -409,16 +631,42 @@ impl GuardianApp {
         let mut attach_request = None;
         egui::SidePanel::left("processes")
             .resizable(true)
-            .default_width(260.0)
+            .default_width(276.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(PANEL)
+                    .inner_margin(egui::Margin::symmetric(14, 16))
+                    .stroke(egui::Stroke::new(1.0_f32, BORDER)),
+            )
             .show(context, |ui| {
-                ui.heading("Processes");
+                ui.label(
+                    RichText::new("TARGETS")
+                        .size(11.0)
+                        .strong()
+                        .color(ACCENT_ALT),
+                );
+                ui.label(RichText::new("Process explorer").size(19.0).strong());
+                ui.label(
+                    RichText::new("Double-click a process to attach")
+                        .size(11.0)
+                        .color(MUTED),
+                );
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.text_edit_singleline(&mut self.process_filter);
-                    if ui.button("↻").on_hover_text("Refresh processes").clicked() {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.process_filter)
+                            .hint_text("Filter by name or PID…")
+                            .desired_width(210.0),
+                    );
+                    if ui
+                        .button(RichText::new("↻").size(18.0))
+                        .on_hover_text("Refresh processes")
+                        .clicked()
+                    {
                         self.refresh_processes();
                     }
                 });
-                ui.separator();
+                ui.add_space(6.0);
 
                 let filter = self.process_filter.to_ascii_lowercase();
                 let processes: Vec<_> = self
@@ -438,13 +686,56 @@ impl GuardianApp {
                             .attached
                             .as_ref()
                             .is_some_and(|attached| attached.info.pid == process.pid);
-                        let response = ui.selectable_label(
-                            selected,
-                            format!("{}\nPID {}", process.name, process.pid),
-                        );
+                        let card = egui::Frame::new()
+                            .fill(if selected {
+                                Color32::from_rgb(25, 59, 50)
+                            } else {
+                                SURFACE
+                            })
+                            .stroke(egui::Stroke::new(
+                                1.0_f32,
+                                if selected { ACCENT } else { BORDER },
+                            ))
+                            .corner_radius(10)
+                            .inner_margin(egui::Margin::symmetric(10, 9))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(30.0, 30.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    ui.painter().circle_filled(
+                                        rect.center(),
+                                        15.0,
+                                        if selected { ACCENT } else { SURFACE_HOVER },
+                                    );
+                                    ui.painter().text(
+                                        rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        process
+                                            .name
+                                            .chars()
+                                            .next()
+                                            .unwrap_or('?')
+                                            .to_ascii_uppercase(),
+                                        egui::FontId::proportional(14.0),
+                                        if selected { Color32::BLACK } else { MUTED },
+                                    );
+                                    ui.vertical(|ui| {
+                                        ui.label(RichText::new(&process.name).strong());
+                                        ui.label(
+                                            RichText::new(format!("PID {}", process.pid))
+                                                .size(11.0)
+                                                .color(MUTED),
+                                        );
+                                    });
+                                });
+                            });
+                        let response = card.response.interact(egui::Sense::click());
                         if response.double_clicked() {
                             attach_request = Some(process);
                         }
+                        ui.add_space(5.0);
                     }
                 });
             });
@@ -455,90 +746,334 @@ impl GuardianApp {
     }
 
     fn top_bar(&mut self, context: &egui::Context) {
-        egui::TopBottomPanel::top("top_bar").show(context, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("HS GUARDIAN").strong().color(ACCENT));
-                ui.separator();
-                ui.selectable_value(&mut self.tab, Tab::Live, "Live code");
-                ui.selectable_value(&mut self.tab, Tab::Pointer, "Pointer chain");
-                ui.selectable_value(&mut self.tab, Tab::Windissect, "WinDissect");
-                ui.separator();
-                if let Some(attached) = &self.attached {
-                    ui.label(format!("{} · {}", attached.info.name, attached.info.pid));
-                    ui.colored_label(
-                        if attached.memory.writable {
-                            ACCENT
-                        } else {
-                            WARNING
-                        },
-                        if attached.memory.writable {
-                            "R/W"
-                        } else {
-                            "READ ONLY"
-                        },
+        egui::TopBottomPanel::top("top_bar")
+            .exact_height(66.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(PANEL)
+                    .inner_margin(egui::Margin::symmetric(18, 12))
+                    .stroke(egui::Stroke::new(1.0_f32, BORDER)),
+            )
+            .show(context, |ui| {
+                ui.horizontal_centered(|ui| {
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::hover());
+                    ui.painter().circle_filled(rect.center(), 18.0, ACCENT);
+                    ui.painter().circle_stroke(
+                        rect.center(),
+                        12.0,
+                        egui::Stroke::new(2.0_f32, Color32::BLACK),
                     );
-                } else {
-                    ui.colored_label(WARNING, "DETACHED");
-                }
+                    ui.painter().line_segment(
+                        [
+                            rect.center() + egui::vec2(-6.0, 0.0),
+                            rect.center() + egui::vec2(6.0, 0.0),
+                        ],
+                        egui::Stroke::new(2.0_f32, Color32::BLACK),
+                    );
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("HS GUARDIAN").size(16.0).strong());
+                        ui.label(RichText::new("LIVE BINARY LAB").size(9.0).color(MUTED));
+                    });
+                    ui.add_space(24.0);
+                    Self::tab_button(ui, &mut self.tab, Tab::Scan, "Search");
+                    Self::tab_button(ui, &mut self.tab, Tab::Live, "Live code");
+                    Self::tab_button(ui, &mut self.tab, Tab::Pointer, "Pointers");
+                    Self::tab_button(ui, &mut self.tab, Tab::Windissect, "WinDissect");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if let Some(attached) = &self.attached {
+                            let access = if attached.memory.writable {
+                                "R/W"
+                            } else {
+                                "READ"
+                            };
+                            ui.label(RichText::new(access).size(11.0).strong().color(
+                                if attached.memory.writable {
+                                    ACCENT
+                                } else {
+                                    WARNING
+                                },
+                            ));
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} · {}",
+                                    attached.info.name, attached.info.pid
+                                ))
+                                .color(MUTED),
+                            );
+                            ui.colored_label(ACCENT, "●");
+                        } else {
+                            ui.label(RichText::new("No target").color(MUTED));
+                            ui.colored_label(WARNING, "●");
+                        }
+                    });
+                });
             });
-        });
     }
 
     fn status_bar(&mut self, context: &egui::Context) {
-        egui::TopBottomPanel::bottom("status").show(context, |ui| {
-            ui.horizontal(|ui| {
-                if self.windissect_rx.is_some() || self.artifact_rx.is_some() {
-                    ui.spinner();
-                }
-                ui.colored_label(
-                    if self.status_error {
-                        ERROR
-                    } else {
-                        Color32::GRAY
-                    },
-                    &self.status,
+        egui::TopBottomPanel::bottom("status")
+            .exact_height(34.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(PANEL)
+                    .inner_margin(egui::Margin::symmetric(14, 5))
+                    .stroke(egui::Stroke::new(1.0_f32, BORDER)),
+            )
+            .show(context, |ui| {
+                ui.horizontal(|ui| {
+                    if self.scan_rx.is_some()
+                        || self.windissect_rx.is_some()
+                        || self.artifact_rx.is_some()
+                    {
+                        ui.spinner();
+                    }
+                    ui.colored_label(if self.status_error { ERROR } else { MUTED }, &self.status);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new("USER MODE · LOCAL").size(10.0).color(MUTED));
+                    });
+                });
+            });
+    }
+
+    fn scan_ui(&mut self, ui: &mut egui::Ui) {
+        Self::page_header(
+            ui,
+            "MEMORY SEARCH",
+            "Track a value through time",
+            "Start with a typed value, change it in the target, then keep only what moved.",
+        );
+        egui::Frame::new()
+            .fill(SURFACE)
+            .stroke(egui::Stroke::new(1.0_f32, BORDER))
+            .corner_radius(12)
+            .inner_margin(egui::Margin::same(14))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new("SCAN CONTROL")
+                        .size(10.0)
+                        .strong()
+                        .color(MUTED),
+                );
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(
+                        self.scan_results.is_empty() && self.scan_rx.is_none(),
+                        |ui| {
+                            egui::ComboBox::from_id_salt("scan_type")
+                                .selected_text(self.scan_type.label())
+                                .show_ui(ui, |ui| {
+                                    for value_type in ValueType::ALL {
+                                        ui.selectable_value(
+                                            &mut self.scan_type,
+                                            value_type,
+                                            value_type.label(),
+                                        );
+                                    }
+                                });
+                        },
+                    );
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.scan_value)
+                            .font(egui::TextStyle::Monospace)
+                            .hint_text("Value")
+                            .desired_width(180.0),
+                    );
+                    ui.label("Max results");
+                    ui.add(egui::DragValue::new(&mut self.scan_limit).range(100..=1_000_000));
+                    if ui
+                        .add_enabled(
+                            self.scan_rx.is_none(),
+                            egui::Button::new(
+                                RichText::new("First scan").strong().color(Color32::BLACK),
+                            )
+                            .fill(ACCENT)
+                            .stroke(egui::Stroke::NONE),
+                        )
+                        .clicked()
+                    {
+                        self.start_first_scan();
+                    }
+                });
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("scan_mode")
+                        .selected_text(self.scan_mode.label())
+                        .show_ui(ui, |ui| {
+                            for mode in ScanMode::ALL {
+                                ui.selectable_value(&mut self.scan_mode, mode, mode.label());
+                            }
+                        });
+                    if ui
+                        .add_enabled(
+                            self.scan_rx.is_none() && !self.scan_results.is_empty(),
+                            egui::Button::new(RichText::new("Next scan").strong())
+                                .fill(Color32::from_rgb(54, 46, 112))
+                                .stroke(egui::Stroke::new(1.0_f32, ACCENT_ALT)),
+                        )
+                        .clicked()
+                    {
+                        self.start_next_scan();
+                    }
+                    if ui.button("Reset").clicked() {
+                        self.scan_results.clear();
+                        self.selected_scan_result = None;
+                        self.set_status("Scan results cleared", false);
+                    }
+                    ui.separator();
+                    ui.label(format!("{} results", self.scan_results.len()));
+                    if self.scan_results.len() == self.scan_limit {
+                        ui.colored_label(WARNING, "result limit reached");
+                    }
+                });
+                ui.label(
+                    RichText::new(
+                        "Changed, increased, and decreased compare against the previous snapshot.",
+                    )
+                    .size(11.0)
+                    .color(MUTED),
                 );
             });
+        ui.add_space(12.0);
+
+        ui.columns(2, |columns| {
+            columns[0].horizontal(|ui| {
+                ui.strong("Address");
+                ui.add_space(115.0);
+                ui.strong("Current");
+                ui.add_space(55.0);
+                ui.strong("Previous");
+            });
+
+            let mut selected = None;
+            egui::ScrollArea::vertical()
+                .id_salt("scan_results")
+                .show_rows(
+                    &mut columns[0],
+                    24.0,
+                    self.scan_results.len(),
+                    |ui, rows| {
+                        for index in rows {
+                            let hit = &self.scan_results[index];
+                            let current = self.scan_type.format(&hit.current);
+                            let previous = self.scan_type.format(&hit.previous);
+                            let changed = hit.current != hit.previous;
+                            let label = format!(
+                                "0x{:016X}    {:>16}    {:>16}{}",
+                                hit.address,
+                                current,
+                                previous,
+                                if changed { "  *" } else { "" }
+                            );
+                            if ui
+                                .selectable_label(
+                                    self.selected_scan_result == Some(index),
+                                    RichText::new(label).monospace().color(if changed {
+                                        ACCENT
+                                    } else {
+                                        Color32::WHITE
+                                    }),
+                                )
+                                .clicked()
+                            {
+                                selected = Some(index);
+                            }
+                        }
+                    },
+                );
+
+            if let Some(index) = selected {
+                self.selected_scan_result = Some(index);
+                let hit = &self.scan_results[index];
+                self.scan_edit_value = self.scan_type.format(&hit.current);
+            }
+
+            columns[1].label(
+                RichText::new("RESULT INSPECTOR")
+                    .size(11.0)
+                    .strong()
+                    .color(ACCENT_ALT),
+            );
+            if let Some(index) = self.selected_scan_result {
+                if let Some(hit) = self.scan_results.get(index) {
+                    let address = hit.address;
+                    columns[1].monospace(format!("0x{address:016X}"));
+                    columns[1].label(format!("Current: {}", self.scan_type.format(&hit.current)));
+                    columns[1].label(format!(
+                        "Previous: {}",
+                        self.scan_type.format(&hit.previous)
+                    ));
+                    columns[1].separator();
+                    columns[1].label("New value");
+                    columns[1].add(
+                        egui::TextEdit::singleline(&mut self.scan_edit_value)
+                            .font(egui::TextStyle::Monospace),
+                    );
+                    columns[1].horizontal(|ui| {
+                        if ui.button("Write value").clicked() {
+                            self.write_scan_result();
+                        }
+                        if ui.button("Open in Live code").clicked() {
+                            self.address_text = format!("0x{address:X}");
+                            self.tab = Tab::Live;
+                            self.read_disassembly();
+                        }
+                    });
+                }
+            } else {
+                columns[1].label("Select a result to inspect or edit it.");
+            }
         });
     }
 
     fn live_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Address");
-            ui.add(
-                egui::TextEdit::singleline(&mut self.address_text)
-                    .font(egui::TextStyle::Monospace)
-                    .desired_width(180.0),
-            );
-            ui.label("Bytes");
-            ui.add(egui::DragValue::new(&mut self.disassembly_size).range(16..=4096));
-            egui::ComboBox::from_id_salt("bitness")
-                .selected_text(format!("{}-bit", self.bitness))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.bitness, 64, "64-bit");
-                    ui.selectable_value(&mut self.bitness, 32, "32-bit");
+        Self::page_header(
+            ui,
+            "LIVE CODE",
+            "Inspect. Patch. Roll back.",
+            "Disassemble the target in place, follow control flow, and keep every byte change reversible.",
+        );
+        egui::Frame::new()
+            .fill(SURFACE)
+            .stroke(egui::Stroke::new(1.0_f32, BORDER))
+            .corner_radius(12)
+            .inner_margin(egui::Margin::symmetric(14, 10))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Address");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.address_text)
+                            .font(egui::TextStyle::Monospace)
+                            .desired_width(180.0),
+                    );
+                    ui.label("Bytes");
+                    ui.add(egui::DragValue::new(&mut self.disassembly_size).range(16..=4096));
+                    egui::ComboBox::from_id_salt("bitness")
+                        .selected_text(format!("{}-bit", self.bitness))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.bitness, 64, "64-bit");
+                            ui.selectable_value(&mut self.bitness, 32, "32-bit");
+                        });
+                    if ui.button("Disassemble").clicked() {
+                        self.read_disassembly();
+                    }
+                    if ui.button("Find xrefs / writes").clicked() {
+                        self.find_xrefs();
+                    }
                 });
-            if ui.button("Disassemble").clicked() {
-                self.read_disassembly();
-            }
-            if ui.button("Find xrefs / writes").clicked() {
-                self.find_xrefs();
-            }
-        });
 
-        ui.horizontal(|ui| {
-            ui.label("Generated source output");
-            ui.text_edit_singleline(&mut self.artifact_output);
-            if ui
-                .add_enabled(
-                    self.artifact_rx.is_none(),
-                    egui::Button::new("Generate C/C++ · Rust · ASM"),
-                )
-                .clicked()
-            {
-                self.start_artifact_generation();
-            }
-        });
+                ui.horizontal(|ui| {
+                    ui.label("Generated source output");
+                    ui.text_edit_singleline(&mut self.artifact_output);
+                    if ui
+                        .add_enabled(
+                            self.artifact_rx.is_none(),
+                            egui::Button::new("Generate C/C++ · Rust · ASM"),
+                        )
+                        .clicked()
+                    {
+                        self.start_artifact_generation();
+                    }
+                });
+            });
 
         if let (Ok(address), Some(ir)) = (parse_address(&self.address_text), &self.loaded_ir) {
             if let Some(symbol) = ir.symbol_at(address) {
@@ -653,38 +1188,49 @@ impl GuardianApp {
     }
 
     fn pointer_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Pointer-chain resolver");
-        ui.label("Adds each offset; every non-final step is dereferenced.");
-        ui.horizontal(|ui| {
-            ui.label("Base");
-            ui.add(
-                egui::TextEdit::singleline(&mut self.pointer_base)
-                    .font(egui::TextStyle::Monospace)
-                    .desired_width(180.0),
-            );
-            if let Some(module) = self.selected_module()
-                && ui.button(format!("Use {} base", module.name)).clicked()
-            {
-                self.pointer_base = format!("0x{:X}", module.base);
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.label("Offsets");
-            ui.add(
-                egui::TextEdit::singleline(&mut self.pointer_offsets)
-                    .font(egui::TextStyle::Monospace)
-                    .desired_width(320.0),
-            );
-            egui::ComboBox::from_id_salt("pointer_size")
-                .selected_text(format!("{}-bit pointers", self.pointer_size * 8))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.pointer_size, 8, "64-bit pointers");
-                    ui.selectable_value(&mut self.pointer_size, 4, "32-bit pointers");
+        Self::page_header(
+            ui,
+            "POINTER LAB",
+            "Chase stable paths through memory",
+            "Each offset is added in order; every non-final step is dereferenced.",
+        );
+        egui::Frame::new()
+            .fill(SURFACE)
+            .stroke(egui::Stroke::new(1.0_f32, BORDER))
+            .corner_radius(12)
+            .inner_margin(egui::Margin::same(14))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Base");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.pointer_base)
+                            .font(egui::TextStyle::Monospace)
+                            .desired_width(180.0),
+                    );
+                    if let Some(module) = self.selected_module()
+                        && ui.button(format!("Use {} base", module.name)).clicked()
+                    {
+                        self.pointer_base = format!("0x{:X}", module.base);
+                    }
                 });
-            if ui.button("Resolve").clicked() {
-                self.resolve_pointer();
-            }
-        });
+                ui.horizontal(|ui| {
+                    ui.label("Offsets");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.pointer_offsets)
+                            .font(egui::TextStyle::Monospace)
+                            .desired_width(320.0),
+                    );
+                    egui::ComboBox::from_id_salt("pointer_size")
+                        .selected_text(format!("{}-bit pointers", self.pointer_size * 8))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.pointer_size, 8, "64-bit pointers");
+                            ui.selectable_value(&mut self.pointer_size, 4, "32-bit pointers");
+                        });
+                    if ui.button("Resolve").clicked() {
+                        self.resolve_pointer();
+                    }
+                });
+            });
         ui.separator();
         for (index, address) in self.pointer_trace.iter().enumerate() {
             ui.monospace(format!("{index:02}  0x{address:016X}"));
@@ -699,8 +1245,12 @@ impl GuardianApp {
     }
 
     fn windissect_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("WinDissect exact-build intelligence");
-        ui.label("Analyze a loaded module or open an existing WinDissect JSON IR.");
+        Self::page_header(
+            ui,
+            "WINDISSECT",
+            "Exact-build binary intelligence",
+            "Anchor live addresses to verified symbols, types, evidence, and generated bindings.",
+        );
 
         if let Some(attached) = &mut self.attached {
             let selected = attached
@@ -855,19 +1405,27 @@ impl GuardianApp {
 
 impl eframe::App for GuardianApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_scan();
         self.poll_windissect();
         self.poll_artifacts();
         self.top_bar(context);
         self.status_bar(context);
         self.process_sidebar(context);
 
-        egui::CentralPanel::default().show(context, |ui| match self.tab {
-            Tab::Live => self.live_ui(ui),
-            Tab::Pointer => self.pointer_ui(ui),
-            Tab::Windissect => self.windissect_ui(ui),
-        });
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(CANVAS)
+                    .inner_margin(egui::Margin::same(20)),
+            )
+            .show(context, |ui| match self.tab {
+                Tab::Scan => self.scan_ui(ui),
+                Tab::Live => self.live_ui(ui),
+                Tab::Pointer => self.pointer_ui(ui),
+                Tab::Windissect => self.windissect_ui(ui),
+            });
 
-        if self.windissect_rx.is_some() || self.artifact_rx.is_some() {
+        if self.scan_rx.is_some() || self.windissect_rx.is_some() || self.artifact_rx.is_some() {
             context.request_repaint_after(std::time::Duration::from_millis(100));
         }
     }

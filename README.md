@@ -6,6 +6,9 @@ HS Guardian is a Windows live-code workspace backed by
 ## Current features
 
 - Process and loaded-module browser
+- Typed value scans for signed/unsigned integers and floating-point values
+- Exact, changed, unchanged, increased, and decreased result refinement
+- Result editing with the same rollback history used by code patches
 - 32/64-bit live instruction disassembly
 - Executable-memory byte patches with original-byte snapshots and rollback
 - Pointer-chain resolver for 32-bit and 64-bit targets

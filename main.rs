@@ -3,6 +3,7 @@
 mod app;
 mod disasm;
 mod memory;
+mod scan;
 mod windissect;
 
 use app::GuardianApp;

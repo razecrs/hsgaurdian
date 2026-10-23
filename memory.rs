@@ -11,7 +11,10 @@ use windows_sys::Win32::{
                 TH32CS_SNAPMODULE32, TH32CS_SNAPPROCESS,
             },
         },
-        Memory::{PAGE_EXECUTE_READWRITE, VirtualProtectEx},
+        Memory::{
+            MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READWRITE, PAGE_GUARD,
+            PAGE_NOACCESS, VirtualProtectEx, VirtualQueryEx,
+        },
         Threading::{
             OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ,
             PROCESS_VM_WRITE,
@@ -101,6 +104,89 @@ impl ProcessMemory {
 
         bytes.truncate(bytes_read);
         Ok(bytes)
+    }
+
+    pub fn scan_exact(
+        &self,
+        pattern: &[u8],
+        alignment: usize,
+        limit: usize,
+    ) -> io::Result<Vec<usize>> {
+        if pattern.is_empty() || alignment == 0 || limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        const CHUNK_SIZE: usize = 1024 * 1024;
+        let mut results = Vec::new();
+        let mut cursor = 0usize;
+
+        loop {
+            let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+            let queried = unsafe {
+                VirtualQueryEx(
+                    self.handle.0,
+                    cursor as *const c_void,
+                    &mut info,
+                    size_of::<MEMORY_BASIC_INFORMATION>(),
+                )
+            };
+            if queried == 0 {
+                break;
+            }
+
+            let region_start = info.BaseAddress as usize;
+            let Some(region_end) = region_start.checked_add(info.RegionSize) else {
+                break;
+            };
+            let readable = info.State == MEM_COMMIT
+                && info.Protect & PAGE_GUARD == 0
+                && info.Protect & PAGE_NOACCESS == 0;
+
+            if readable {
+                let mut address = region_start;
+                let mut carry = Vec::new();
+                while address < region_end {
+                    let length = CHUNK_SIZE.min(region_end - address);
+                    match self.read(address, length) {
+                        Ok(bytes) if !bytes.is_empty() => {
+                            let carry_length = carry.len();
+                            let combined_start = address.saturating_sub(carry_length);
+                            carry.extend_from_slice(&bytes);
+                            if carry.len() >= pattern.len() {
+                                for index in 0..=carry.len() - pattern.len() {
+                                    let candidate = combined_start + index;
+                                    let reaches_new_bytes = index + pattern.len() > carry_length;
+                                    if reaches_new_bytes
+                                        && candidate.is_multiple_of(alignment)
+                                        && carry[index..index + pattern.len()] == *pattern
+                                    {
+                                        results.push(candidate);
+                                        if results.len() >= limit {
+                                            return Ok(results);
+                                        }
+                                    }
+                                }
+                            }
+
+                            let overlap = pattern.len().saturating_sub(1).min(carry.len());
+                            carry.drain(..carry.len() - overlap);
+                        }
+                        _ => carry.clear(),
+                    }
+                    address = match address.checked_add(length) {
+                        Some(next) => next,
+                        None => break,
+                    };
+                }
+            }
+
+            if region_end <= cursor {
+                break;
+            }
+            cursor = region_end;
+        }
+
+        Ok(results)
     }
 
     pub fn patch(&self, address: usize, replacement: &[u8]) -> io::Result<Vec<u8>> {
