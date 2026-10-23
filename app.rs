@@ -1,6 +1,9 @@
 use std::{
     path::PathBuf,
-    sync::mpsc::{self, Receiver},
+    sync::{
+        Arc,
+        mpsc::{self, Receiver},
+    },
     thread,
 };
 
@@ -13,7 +16,7 @@ use crate::{
         parse_address, parse_hex_bytes, parse_offsets,
     },
     scan::{ScanHit, ScanMode, ValueType, first_scan, next_scan},
-    windissect::{LoadedIr, Xref, default_executable, emit_artifacts, extract_ir},
+    windissect::{LoadedIr, Xref, default_executable, emit_artifacts, extract_ir, full_pipeline},
 };
 
 const ACCENT: Color32 = Color32::from_rgb(83, 214, 151);
@@ -33,6 +36,12 @@ enum Tab {
     Live,
     Pointer,
     Windissect,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LiveMode {
+    Code,
+    Data,
 }
 
 struct AttachedProcess {
@@ -69,7 +78,9 @@ pub struct GuardianApp {
     address_text: String,
     disassembly_size: usize,
     bitness: u32,
+    live_mode: LiveMode,
     disassembly: Vec<DisassemblyLine>,
+    memory_dump: Vec<u8>,
     patch_text: String,
     patches: Vec<PatchRecord>,
     xrefs: Vec<Xref>,
@@ -88,9 +99,64 @@ pub struct GuardianApp {
     windissect_rx: Option<Receiver<Result<LoadedIr, String>>>,
     artifact_output: String,
     artifact_rx: Option<Receiver<Result<PathBuf, String>>>,
+    pipeline_root: String,
+    exhaustive_inventory: bool,
 }
 
 impl GuardianApp {
+    fn render_hex_dump(address: usize, bytes: &[u8]) -> String {
+        bytes
+            .chunks(16)
+            .enumerate()
+            .map(|(row, chunk)| {
+                let hex = chunk
+                    .iter()
+                    .map(|byte| format!("{byte:02X}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let text: String = chunk
+                    .iter()
+                    .map(|byte| {
+                        if byte.is_ascii_graphic() || *byte == b' ' {
+                            *byte as char
+                        } else {
+                            '.'
+                        }
+                    })
+                    .collect();
+                format!("{:016X}  {:<47}  |{}|", address + row * 16, hex, text)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn install_windows_fonts(context: &egui::Context) {
+        let mut fonts = egui::FontDefinitions::default();
+        if let Ok(bytes) = std::fs::read(r"C:\Windows\Fonts\segoeui.ttf") {
+            fonts.font_data.insert(
+                "Segoe UI".into(),
+                Arc::new(egui::FontData::from_owned(bytes)),
+            );
+            fonts
+                .families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .insert(0, "Segoe UI".into());
+        }
+        if let Ok(bytes) = std::fs::read(r"C:\Windows\Fonts\CascadiaMono.ttf") {
+            fonts.font_data.insert(
+                "Cascadia Mono".into(),
+                Arc::new(egui::FontData::from_owned(bytes)),
+            );
+            fonts
+                .families
+                .entry(egui::FontFamily::Monospace)
+                .or_default()
+                .insert(0, "Cascadia Mono".into());
+        }
+        context.set_fonts(fonts);
+    }
+
     fn page_header(ui: &mut egui::Ui, kicker: &str, title: &str, subtitle: &str) {
         ui.label(RichText::new(kicker).size(11.0).strong().color(ACCENT));
         ui.label(RichText::new(title).size(25.0).strong());
@@ -122,6 +188,7 @@ impl GuardianApp {
     }
 
     pub fn new(context: &eframe::CreationContext<'_>) -> Self {
+        Self::install_windows_fonts(&context.egui_ctx);
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = CANVAS;
         visuals.window_fill = SURFACE;
@@ -194,7 +261,9 @@ impl GuardianApp {
             address_text: String::new(),
             disassembly_size: 384,
             bitness: 64,
+            live_mode: LiveMode::Code,
             disassembly: Vec::new(),
+            memory_dump: Vec::new(),
             patch_text: String::new(),
             patches: Vec::new(),
             xrefs: Vec::new(),
@@ -211,6 +280,8 @@ impl GuardianApp {
             windissect_rx: None,
             artifact_output: "windissect-generated".into(),
             artifact_rx: None,
+            pipeline_root: "windissect-workspaces/hill-climb-racing".into(),
+            exhaustive_inventory: true,
         }
     }
 
@@ -233,6 +304,7 @@ impl GuardianApp {
         match ProcessMemory::open(info.pid) {
             Ok(memory) => {
                 let writable = memory.writable;
+                let bitness = memory.bitness();
                 match list_modules(info.pid) {
                     Ok(modules) => {
                         if let Some(module) = modules.first() {
@@ -246,6 +318,8 @@ impl GuardianApp {
                             selected_module: 0,
                         });
                         self.loaded_ir = None;
+                        self.bitness = bitness;
+                        self.pointer_size = (bitness / 8) as usize;
                         self.scan_rx = None;
                         self.scan_results.clear();
                         self.selected_scan_result = None;
@@ -303,6 +377,35 @@ impl GuardianApp {
         }
     }
 
+    fn read_memory_dump(&mut self) {
+        let result = (|| {
+            let address = parse_address(&self.address_text)?;
+            let attached = self
+                .attached
+                .as_ref()
+                .ok_or_else(|| "attach to a process first".to_owned())?;
+            attached
+                .memory
+                .read(address, self.disassembly_size)
+                .map_err(|error| format!("read failed at 0x{address:X}: {error}"))
+        })();
+
+        match result {
+            Ok(bytes) => {
+                self.memory_dump = bytes;
+                self.set_status("Memory view refreshed", false);
+            }
+            Err(error) => self.set_status(error, true),
+        }
+    }
+
+    fn refresh_live_view(&mut self) {
+        match self.live_mode {
+            LiveMode::Code => self.read_disassembly(),
+            LiveMode::Data => self.read_memory_dump(),
+        }
+    }
+
     fn apply_patch(&mut self) {
         let result = (|| {
             let address = parse_address(&self.address_text)?;
@@ -327,7 +430,7 @@ impl GuardianApp {
                     active: true,
                 });
                 self.set_status(format!("Patched 0x{address:X}"), false);
-                self.read_disassembly();
+                self.refresh_live_view();
             }
             Err(error) => self.set_status(error, true),
         }
@@ -357,7 +460,7 @@ impl GuardianApp {
             Ok(_) => {
                 self.patches[index].active = false;
                 self.set_status(format!("Restored original bytes at 0x{address:X}"), false);
-                self.read_disassembly();
+                self.refresh_live_view();
             }
             Err(error) => self.set_status(error, true),
         }
@@ -554,6 +657,38 @@ impl GuardianApp {
         self.set_status(
             format!(
                 "WinDissect is analyzing {}…",
+                self.selected_module().unwrap().name
+            ),
+            false,
+        );
+    }
+
+    fn start_full_pipeline(&mut self) {
+        let Some(module) = self.selected_module().cloned() else {
+            self.set_status("select an attached module first", true);
+            return;
+        };
+        let executable = PathBuf::from(self.windissect_exe.trim());
+        let pdb = (!self.pdb_path.trim().is_empty()).then(|| PathBuf::from(self.pdb_path.trim()));
+        let module_stem = PathBuf::from(&module.name)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("module")
+            .to_ascii_lowercase();
+        let root = PathBuf::from(self.pipeline_root.trim()).join(module_stem);
+        let semantic_ir = root.join("ir").join("semantic.json");
+        self.ir_path = semantic_ir.display().to_string();
+        let exhaustive = self.exhaustive_inventory;
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let result = full_pipeline(&executable, &module, pdb.as_deref(), &root, exhaustive)
+                .and_then(|ir| LoadedIr::load(ir, &module));
+            let _ = sender.send(result);
+        });
+        self.windissect_rx = Some(receiver);
+        self.set_status(
+            format!(
+                "Building the full WinDissect SDK for {}…",
                 self.selected_module().unwrap().name
             ),
             false,
@@ -1011,10 +1146,11 @@ impl GuardianApp {
                         if ui.button("Write value").clicked() {
                             self.write_scan_result();
                         }
-                        if ui.button("Open in Live code").clicked() {
+                        if ui.button("Inspect memory").clicked() {
                             self.address_text = format!("0x{address:X}");
                             self.tab = Tab::Live;
-                            self.read_disassembly();
+                            self.live_mode = LiveMode::Data;
+                            self.read_memory_dump();
                         }
                     });
                 }
@@ -1038,6 +1174,9 @@ impl GuardianApp {
             .inner_margin(egui::Margin::symmetric(14, 10))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.live_mode, LiveMode::Code, "Instructions");
+                    ui.selectable_value(&mut self.live_mode, LiveMode::Data, "Hex / data");
+                    ui.separator();
                     ui.label("Address");
                     ui.add(
                         egui::TextEdit::singleline(&mut self.address_text)
@@ -1052,25 +1191,17 @@ impl GuardianApp {
                             ui.selectable_value(&mut self.bitness, 64, "64-bit");
                             ui.selectable_value(&mut self.bitness, 32, "32-bit");
                         });
-                    if ui.button("Disassemble").clicked() {
-                        self.read_disassembly();
+                    if ui
+                        .button(match self.live_mode {
+                            LiveMode::Code => "Disassemble",
+                            LiveMode::Data => "Read memory",
+                        })
+                        .clicked()
+                    {
+                        self.refresh_live_view();
                     }
                     if ui.button("Find xrefs / writes").clicked() {
                         self.find_xrefs();
-                    }
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Generated source output");
-                    ui.text_edit_singleline(&mut self.artifact_output);
-                    if ui
-                        .add_enabled(
-                            self.artifact_rx.is_none(),
-                            egui::Button::new("Generate C/C++ · Rust · ASM"),
-                        )
-                        .clicked()
-                    {
-                        self.start_artifact_generation();
                     }
                 });
             });
@@ -1086,40 +1217,59 @@ impl GuardianApp {
 
         ui.separator();
         ui.columns(2, |columns| {
-            columns[0].heading("Live instructions");
-            egui::ScrollArea::vertical()
-                .id_salt("disassembly")
-                .show(&mut columns[0], |ui| {
-                    let mut navigate = None;
-                    for line in &self.disassembly {
-                        ui.horizontal(|ui| {
-                            if ui
-                                .selectable_label(
-                                    false,
-                                    RichText::new(render_line(line)).monospace(),
-                                )
-                                .clicked()
-                            {
-                                self.address_text = format!("0x{:X}", line.address);
-                                self.patch_text = format_hex(&line.bytes);
+            match self.live_mode {
+                LiveMode::Code => {
+                    columns[0].heading("Live instructions");
+                    egui::ScrollArea::vertical().id_salt("disassembly").show(
+                        &mut columns[0],
+                        |ui| {
+                            let mut navigate = None;
+                            for line in &self.disassembly {
+                                ui.horizontal(|ui| {
+                                    if ui
+                                        .selectable_label(
+                                            false,
+                                            RichText::new(render_line(line)).monospace(),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.address_text = format!("0x{:X}", line.address);
+                                        self.patch_text = format_hex(&line.bytes);
+                                    }
+                                    if let Some(target) = line.branch_target
+                                        && ui
+                                            .small_button(if line.is_call {
+                                                "call ->"
+                                            } else {
+                                                "jump ->"
+                                            })
+                                            .clicked()
+                                    {
+                                        navigate = Some(target);
+                                    }
+                                });
                             }
-                            if let Some(target) = line.branch_target
-                                && ui
-                                    .small_button(if line.is_call {
-                                        "call →"
-                                    } else {
-                                        "jump →"
-                                    })
-                                    .clicked()
-                            {
-                                navigate = Some(target);
+                            if let Some(target) = navigate {
+                                self.address_text = format!("0x{target:X}");
                             }
+                        },
+                    );
+                }
+                LiveMode::Data => {
+                    columns[0].heading("Memory inspector");
+                    let address = parse_address(&self.address_text).unwrap_or_default();
+                    let dump = Self::render_hex_dump(address, &self.memory_dump);
+                    egui::ScrollArea::both()
+                        .id_salt("memory_dump")
+                        .show(&mut columns[0], |ui| {
+                            ui.add(
+                                egui::Label::new(RichText::new(dump).monospace())
+                                    .selectable(true)
+                                    .wrap_mode(egui::TextWrapMode::Extend),
+                            );
                         });
-                    }
-                    if let Some(target) = navigate {
-                        self.address_text = format!("0x{target:X}");
-                    }
-                });
+                }
+            }
 
             columns[1].heading("Patch bytes");
             columns[1].add(
@@ -1162,6 +1312,7 @@ impl GuardianApp {
                 });
             if let Some(address) = navigate {
                 self.address_text = format!("0x{address:X}");
+                self.live_mode = LiveMode::Code;
                 self.read_disassembly();
             }
 
@@ -1172,7 +1323,7 @@ impl GuardianApp {
                 columns[1].horizontal(|ui| {
                     ui.monospace(format!("0x{:X}", patch.address));
                     ui.small(format!(
-                        "{} → {}",
+                        "{} -> {}",
                         format_hex(&patch.original),
                         format_hex(&patch.replacement)
                     ));
@@ -1236,11 +1387,12 @@ impl GuardianApp {
             ui.monospace(format!("{index:02}  0x{address:016X}"));
         }
         if let Some(address) = self.pointer_trace.last().copied()
-            && ui.button("Open final address in Live code").clicked()
+            && ui.button("Inspect final address").clicked()
         {
             self.address_text = format!("0x{address:X}");
             self.tab = Tab::Live;
-            self.read_disassembly();
+            self.live_mode = LiveMode::Data;
+            self.read_memory_dump();
         }
     }
 
@@ -1289,12 +1441,37 @@ impl GuardianApp {
                 ui.label("IR JSON");
                 ui.text_edit_singleline(&mut self.ir_path);
                 ui.end_row();
+                ui.label("Workspace root");
+                ui.text_edit_singleline(&mut self.pipeline_root);
+                ui.end_row();
+                ui.label("Artifact output");
+                ui.text_edit_singleline(&mut self.artifact_output);
+                ui.end_row();
             });
+        ui.checkbox(
+            &mut self.exhaustive_inventory,
+            "Include exhaustive PDB/PE inventory (slower, best for SDK work)",
+        );
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
                     self.windissect_rx.is_none(),
-                    egui::Button::new("Analyze module"),
+                    egui::Button::new(
+                        RichText::new("Build full SDK")
+                            .strong()
+                            .color(Color32::BLACK),
+                    )
+                    .fill(ACCENT)
+                    .stroke(egui::Stroke::NONE),
+                )
+                .clicked()
+            {
+                self.start_full_pipeline();
+            }
+            if ui
+                .add_enabled(
+                    self.windissect_rx.is_none(),
+                    egui::Button::new("Quick extract"),
                 )
                 .clicked()
             {
@@ -1309,6 +1486,15 @@ impl GuardianApp {
             {
                 self.start_ir_load(PathBuf::from(self.ir_path.trim()));
             }
+            if ui
+                .add_enabled(
+                    self.artifact_rx.is_none() && self.loaded_ir.is_some(),
+                    egui::Button::new("Regenerate artifacts"),
+                )
+                .clicked()
+            {
+                self.start_artifact_generation();
+            }
         });
 
         let Some(ir) = &self.loaded_ir else {
@@ -1317,9 +1503,11 @@ impl GuardianApp {
         ui.separator();
         ui.horizontal(|ui| {
             ui.label(format!(
-                "Schema {} · {} symbols",
+                "Schema {} · {} symbols · {} functions · {} instructions",
                 ir.schema,
-                ir.symbols.len()
+                ir.symbols.len(),
+                ir.function_count(),
+                ir.instruction_count()
             ));
             match ir.exact_build_match {
                 Some(true) => {
@@ -1334,8 +1522,9 @@ impl GuardianApp {
             }
         });
         ui.small(format!(
-            "{} · preferred base {} · image size {}",
+            "{} · {} · preferred base {} · image size {}",
             ir.binary.file,
+            ir.binary.machine.as_deref().unwrap_or("unknown machine"),
             ir.binary
                 .image_base
                 .map_or_else(|| "unknown".into(), |value| format!("0x{value:X}")),
@@ -1398,6 +1587,7 @@ impl GuardianApp {
         if let Some(address) = open_address {
             self.address_text = format!("0x{address:X}");
             self.tab = Tab::Live;
+            self.live_mode = LiveMode::Code;
             self.read_disassembly();
         }
     }

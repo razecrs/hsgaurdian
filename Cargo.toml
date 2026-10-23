@@ -3,6 +3,10 @@ name = "hsgaurdian"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = [".", "vendor/windissect"]
+resolver = "3"
+
 [dependencies]
 eframe = { version = "0.33.3", default-features = false, features = ["default_fonts", "glow"] }
 iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder", "instr_info", "nasm"] }
@@ -14,7 +18,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Threading",
     "Win32_System_Memory",
     "Win32_System_Diagnostics_Debug",
-    "Win32_System_Diagnostics_ToolHelp"
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_SystemInformation"
 ]}
 [[bin]]
 name = "hsgaurdian"

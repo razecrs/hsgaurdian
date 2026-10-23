@@ -1,0 +1,51 @@
+{
+  "binary": {
+    "file": "dui70.dll",
+    "timestamp": 1597608900,
+    "machine": "x86-64",
+    "pdb_guid": "1F9481899ABD1A4D518D17695D847D90",
+    "pdb_age": 1,
+    "sha256": "2878ECCC8351F19888DE58271684332F65BC103FC67664436F3DC26C30E16A5F"
+  },
+  "layouts": [
+    {
+      "name": "DirectUI::Element",
+      "size": 200,
+      "size_confidence": "certain",
+      "fields": [
+        {"offset": 24, "width": 4, "name": "index", "confidence": "certain", "evidence_rva": 466800},
+        {"offset": 80, "width": 8, "name": "parent", "confidence": "certain", "evidence_rva": 428416},
+        {"offset": 128, "width": 8, "name": "style_sheet", "confidence": "certain", "evidence_rva": 621408},
+        {"offset": 144, "width": 2, "name": "id_atom", "confidence": "certain", "evidence_rva": 462016},
+        {"offset": 184, "width": 8, "name": "p_impl", "confidence": "likely", "evidence_rva": 425312},
+        {"offset": 192, "width": 8, "name": "root_window_for_theming", "confidence": "certain", "evidence_rva": 425312}
+      ]
+    },
+    {
+      "name": "DirectUI::HWNDElement",
+      "size": 256,
+      "size_confidence": "certain",
+      "size_evidence_rva": 695248,
+      "fields": [
+        {"offset": 200, "width": 8, "name": "hwnd", "confidence": "certain", "evidence_rva": 421504},
+        {"offset": 224, "width": 1, "name": "parent_size_control_flags", "confidence": "certain", "evidence_rva": 660528},
+        {"offset": 225, "width": 1, "name": "screen_center_flags", "confidence": "certain", "evidence_rva": 660544},
+        {"offset": 226, "width": 2, "name": "ui_state", "confidence": "certain", "evidence_rva": 623760}
+      ]
+    },
+    {
+      "name": "DirectUI::HWNDHost",
+      "fields": [
+        {"offset": 208, "width": 8, "name": "hwnd", "confidence": "certain", "evidence_rva": 461552},
+        {"offset": 312, "width": 8, "name": null, "confidence": "likely", "evidence_rva": 504832}
+      ]
+    },
+    {
+      "name": "DirectUI::Value",
+      "fields": [
+        {"offset": 0, "width": 4, "name": "tag_and_refcount", "confidence": "certain", "evidence_rvas": [322960, 644640]},
+        {"offset": 8, "width": 8, "name": "payload_union", "confidence": "certain", "evidence_rvas": [455616, 536704, 623328, 643312]}
+      ]
+    }
+  ]
+}

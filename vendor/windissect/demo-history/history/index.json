@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "targets": [
+    {
+      "target": "gdi32",
+      "file": "gdi32.dll",
+      "index": "gdi32/index.json",
+      "latest": "1557283195-92C6EC2ABE478836C99BC83C2F3AE355-1",
+      "build_count": 2
+    }
+  ]
+}

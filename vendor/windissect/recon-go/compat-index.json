@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "generated_utc": "2026-09-06T18:16:32.4550177Z",
+  "windows_build": "10.0.26200",
+  "architecture": "AMD64",
+  "extractor_path": "C:\\Users\\raze\\Projects\\windissect\\target\\release\\windissect.exe",
+  "extractor_sha256": "F3779428629328301F3F04E300F1D9F7FA68B36A556F4ED3E827E20A65A3850C",
+  "targets": [
+    {
+      "id": "taskbar",
+      "file": "taskbar.dll",
+      "required": true,
+      "source_path": "C:\\WINDOWS\\System32\\taskbar.dll",
+      "status": "verified-pdb",
+      "sha256": "c33ac99a6c8af2990799506ecfec249099ef841709c8a603c2f5e334b4cb2570",
+      "pdb_name": "Taskbar.pdb",
+      "pdb_guid": "6C3AA9496CD5913CBF5AE8A6F3B506AA",
+      "pdb_age": 1,
+      "pdb_used": true,
+      "ir": "C:\\Users\\raze\\Projects\\windissect\\recon-go\\ir\\taskbar.json"
+    },
+    {
+      "id": "twinui",
+      "file": "twinui.dll",
+      "required": true,
+      "source_path": "C:\\WINDOWS\\System32\\twinui.dll",
+      "status": "verified-pdb",
+      "sha256": "4b721eaeec1f066871ea69323af393219a1da24ec525f16a6b6b6a737baf7dcf",
+      "pdb_name": "twinui.pdb",
+      "pdb_guid": "E915A9669E926AAEFF15691C5D54A9DA",
+      "pdb_age": 1,
+      "pdb_used": true,
+      "ir": "C:\\Users\\raze\\Projects\\windissect\\recon-go\\ir\\twinui.json"
+    },
+    {
+      "id": "twinui.pcshell",
+      "file": "twinui.pcshell.dll",
+      "required": true,
+      "source_path": "C:\\WINDOWS\\System32\\twinui.pcshell.dll",
+      "status": "verified-pdb",
+      "sha256": "6d9a82c11562817f630a1c3933135b51358c3340d767fba973f482b548b5a9a5",
+      "pdb_name": "twinui.pcshell.pdb",
+      "pdb_guid": "FCFCF4EFC4BB468AC3C12242EB80463A",
+      "pdb_age": 1,
+      "pdb_used": true,
+      "ir": "C:\\Users\\raze\\Projects\\windissect\\recon-go\\ir\\twinui.pcshell.json"
+    }
+  ]
+}

@@ -20,6 +20,8 @@ pub struct IrBinary {
     pub image_base: Option<u64>,
     #[serde(default)]
     pub image_size: Option<u64>,
+    #[serde(default)]
+    pub machine: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -138,6 +140,17 @@ impl LoadedIr {
 
     pub fn live_address(&self, symbol: &IrSymbol) -> usize {
         self.module_base.saturating_add(symbol.rva as usize)
+    }
+
+    pub fn function_count(&self) -> usize {
+        self.functions.len()
+    }
+
+    pub fn instruction_count(&self) -> usize {
+        self.functions
+            .iter()
+            .map(|function| function.instructions.len())
+            .sum()
     }
 
     pub fn symbol_at(&self, address: usize) -> Option<&IrSymbol> {
@@ -322,29 +335,146 @@ pub fn extract_ir(
 pub fn emit_artifacts(executable: &Path, ir: &Path, output: &Path) -> Result<PathBuf, String> {
     std::fs::create_dir_all(output)
         .map_err(|error| format!("could not create {}: {error}", output.display()))?;
+    let mut report = String::from("WinDissect artifact report\n==========================\n");
+    let mut succeeded = 0usize;
+    macro_rules! attempt {
+        ($name:literal, $command:literal, $path:expr) => {
+            match run_windissect(executable, [$command, "--ir"], ir, "--out", &$path) {
+                Ok(()) => {
+                    succeeded += 1;
+                    report.push_str(concat!("[generated] ", $name, "\n"));
+                }
+                Err(error) => {
+                    report.push_str(&format!("[unavailable] {}: {}\n", $name, error));
+                }
+            }
+        };
+    }
 
-    run_windissect(
-        executable,
-        ["emit-headers", "--ir"],
-        ir,
-        "--out",
-        &output.join("headers"),
-    )?;
-    run_windissect(
-        executable,
-        ["emit-rust", "--ir"],
-        ir,
-        "--out",
-        &output.join("rust"),
-    )?;
-    run_windissect(
-        executable,
-        ["emit-asm", "--ir"],
-        ir,
-        "--out",
-        &output.join("disassembly.asm"),
-    )?;
+    attempt!("C RVA symbol table", "emit-syms", output.join("symbols"));
+    attempt!(
+        "C/C++ class headers",
+        "emit-headers",
+        output.join("headers")
+    );
+    attempt!("Rust FFI crate", "emit-rust", output.join("rust"));
+    attempt!(
+        "annotated assembly",
+        "emit-asm",
+        output.join("disassembly.asm")
+    );
+    attempt!("proof evidence", "emit-evidence", output.join("evidence"));
+    attempt!("API documentation", "doc", output.join("docs"));
+
+    std::fs::write(output.join("artifact-report.txt"), &report)
+        .map_err(|error| format!("could not write artifact report: {error}"))?;
+    if succeeded == 0 {
+        return Err(report);
+    }
     Ok(output.to_path_buf())
+}
+
+pub fn full_pipeline(
+    executable: &Path,
+    module: &ModuleInfo,
+    pdb: Option<&Path>,
+    root: &Path,
+    exhaustive_inventory: bool,
+) -> Result<PathBuf, String> {
+    let ir_directory = root.join("ir");
+    let compact_ir = ir_directory.join("raw.json");
+    let inventory_directory = root.join("inventory");
+    let raw_ir = if exhaustive_inventory {
+        inventory_directory.join("inventory.ir.json")
+    } else {
+        compact_ir
+    };
+    let semantic_ir = ir_directory.join("semantic.json");
+    let refinement = root.join("refinement");
+    std::fs::create_dir_all(&ir_directory)
+        .map_err(|error| format!("could not create {}: {error}", ir_directory.display()))?;
+    std::fs::create_dir_all(&refinement)
+        .map_err(|error| format!("could not create {}: {error}", refinement.display()))?;
+
+    if exhaustive_inventory {
+        let mut pgressive = Command::new(executable);
+        pgressive
+            .arg("pgressive")
+            .arg(&module.path)
+            .arg("--out")
+            .arg(&inventory_directory);
+        if let Some(pdb) = pdb {
+            pgressive.arg("--pdb").arg(pdb);
+        }
+        run_simple(executable, &mut pgressive)?;
+    } else {
+        extract_ir(executable, module, pdb, &raw_ir)?;
+    }
+    run_simple(
+        executable,
+        Command::new(executable)
+            .arg("verify")
+            .arg("--ir")
+            .arg(&raw_ir),
+    )?;
+
+    let mut refine = Command::new(executable);
+    refine
+        .arg("refine")
+        .arg("--semantic")
+        .arg("--ir")
+        .arg(&raw_ir)
+        .arg("--binary")
+        .arg(&module.path)
+        .arg("--semantic-out")
+        .arg(root.join("semantic"))
+        .arg("--out")
+        .arg(refinement.join("report.json"))
+        .arg("--out-ir")
+        .arg(&semantic_ir);
+    if let Some(pdb) = pdb {
+        refine.arg("--pdb").arg(pdb);
+    }
+    run_simple(executable, &mut refine)?;
+    run_simple(
+        executable,
+        Command::new(executable)
+            .arg("verify")
+            .arg("--ir")
+            .arg(&semantic_ir),
+    )?;
+
+    emit_artifacts(executable, &semantic_ir, &root.join("sdk"))?;
+    run_simple(
+        executable,
+        Command::new(executable)
+            .arg("record-build")
+            .arg(&semantic_ir)
+            .arg("--history")
+            .arg(root.join("history")),
+    )?;
+
+    Ok(semantic_ir)
+}
+
+fn run_simple(executable: &Path, command: &mut Command) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let result = command
+        .output()
+        .map_err(|error| format!("could not launch {}: {error}", executable.display()))?;
+    if result.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "WinDissect failed:\n{}{}",
+            String::from_utf8_lossy(&result.stderr),
+            String::from_utf8_lossy(&result.stdout)
+        ))
+    }
 }
 
 fn run_windissect(
@@ -379,10 +509,16 @@ pub fn default_executable() -> PathBuf {
     std::env::var_os("WINDISSECT_EXE")
         .map(PathBuf::from)
         .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|path| path.parent().map(|parent| parent.join("windissect.exe")))
+                .filter(|path| path.exists())
+        })
+        .or_else(|| {
             let release = PathBuf::from(r"D:\Projects\windissect\target\release\windissect.exe");
             release.exists().then_some(release)
         })
-        .unwrap_or_else(|| PathBuf::from(r"D:\Projects\windissect\windissect.exe"))
+        .unwrap_or_else(|| PathBuf::from("windissect.exe"))
 }
 
 #[cfg(test)]

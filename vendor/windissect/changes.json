@@ -1,0 +1,269 @@
+{
+  "schema": 1,
+  "target": "amsi.dll",
+  "from": {
+    "file": "amsi.dll",
+    "timestamp": "3973611524",
+    "pdb_guid": "3FEDCC4DC3DAFECEEEB09CFBB87F35AF",
+    "pdb_age": 1,
+    "machine": "0x014c",
+    "image_base": 268435456
+  },
+  "to": {
+    "file": "amsi.dll",
+    "timestamp": "1192280633",
+    "pdb_guid": "ED1FE97E805248BF9003CA33F0844F72",
+    "pdb_age": 1,
+    "machine": "0x014c",
+    "image_base": 268435456
+  },
+  "summary": {
+    "old_symbols": 14,
+    "new_symbols": 14,
+    "added": 0,
+    "removed": 0,
+    "modified": 6,
+    "signature_changes": 0,
+    "implementation_changes": 6,
+    "call_graph_changes": 0,
+    "import_changes": 0
+  },
+  "added": [],
+  "removed": [],
+  "modified": [
+    {
+      "id": "AmsiInitialize",
+      "flags": {
+        "signature": false,
+        "implementation": true,
+        "calls": false,
+        "imports": false,
+        "size": false,
+        "kind": false,
+        "export_status": false,
+        "rva": false
+      },
+      "before": {
+        "id": "AmsiInitialize",
+        "mangled": "AmsiInitialize",
+        "demangled": null,
+        "rva": 23248,
+        "size": 592,
+        "kind": "CFunc",
+        "exported": true,
+        "signature": "{\"params\":[],\"is_const\":false,\"parse_ok\":false}",
+        "body_hash": "2e3fb8ad2033d1cdb8ffaf1bd9188660cb55f9ebabebb9d4903c0288439c62cd",
+        "calls": [],
+        "imports": []
+      },
+      "after": {
+        "id": "AmsiInitialize",
+        "mangled": "AmsiInitialize",
+        "demangled": null,
+        "rva": 23248,
+        "size": 592,
+        "kind": "CFunc",
+        "exported": true,
+        "signature": "{\"params\":[],\"is_const\":false,\"parse_ok\":false}",
+        "body_hash": "ada6cf04a0bdc27b5206d30fe8dd182577ec90f006dcdb34303cf09e787f81cc",
+        "calls": [],
+        "imports": []
+      }
+    },
+    {
+      "id": "AmsiUacInitialize",
+      "flags": {
+        "signature": false,
+        "implementation": true,
+        "calls": false,
+        "imports": false,
+        "size": false,
+        "kind": false,
+        "export_status": false,
+        "rva": false
+      },
+      "before": {
+        "id": "AmsiUacInitialize",
+        "mangled": "AmsiUacInitialize",
+        "demangled": null,
+        "rva": 24448,
+        "size": 384,
+        "kind": "CFunc",
+        "exported": true,
+        "signature": "{\"params\":[],\"is_const\":false,\"parse_ok\":false}",
+        "body_hash": "7d9512a0c67da16f2b72d9fb62273e4be04f6cac617ffcc248d0eb6f017c77dc",
+        "calls": [],
+        "imports": []
+      },
+      "after": {
+        "id": "AmsiUacInitialize",
+        "mangled": "AmsiUacInitialize",
+        "demangled": null,
+        "rva": 24448,
+        "size": 384,
+        "kind": "CFunc",
+        "exported": true,
+        "signature": "{\"params\":[],\"is_const\":false,\"parse_ok\":false}",
+        "body_hash": "2916f6533eafad731af3159fe91dccd098a87c18511630b29dc1ddb18a9414b3",
+        "calls": [],
+        "imports": []
+      }
+    },
+    {
+      "id": "AmsiUacScan",
+      "flags": {
+        "signature": false,
+        "implementation": true,
+        "calls": false,
+        "imports": false,
+        "size": false,
+        "kind": false,
+        "export_status": false,
+        "rva": false
+      },
+      "before": {
+        "id": "AmsiUacScan",
+        "mangled": "AmsiUacScan",
+        "demangled": null,
+        "rva": 24912,
+        "size": 32842,
+        "kind": "CFunc",
+        "exported": true,
+        "signature": "{\"params\":[],\"is_const\":false,\"parse_ok\":false}",
+        "body_hash": "cf7be65fbb1cdf462a54eaf4091aac62b80162b1b84f5b1b79a41ff6d22dd231",
+        "calls": [],
+        "imports": []
+      },
+      "after": {
+        "id": "AmsiUacScan",
+        "mangled": "AmsiUacScan",
+        "demangled": null,
+        "rva": 24912,
+        "size": 32842,
+        "kind": "CFunc",
+        "exported": true,
+        "signature": "{\"params\":[],\"is_const\":false,\"parse_ok\":false}",
+        "body_hash": "61f8d540c705c4af609d5de69069fd63b14360a7cb096d61bd909c24ca66ee19",
+        "calls": [],
+        "imports": []
+      }
+    },
+    {
+      "id": "AmsiUacUninitialize",
+      "flags": {
+        "signature": false,
+        "implementation": true,
+        "calls": false,
+        "imports": false,
+        "size": false,
+        "kind": false,
+        "export_status": false,
+        "rva": false
+      },
+      "before": {
+        "id": "AmsiUacUninitialize",
+        "mangled": "AmsiUacUninitialize",
+        "demangled": null,
+        "rva": 24832,
+        "size": 80,
+        "kind": "CFunc",
+        "exported": true,
+        "signature": "{\"params\":[],\"is_const\":false,\"parse_ok\":false}",
+        "body_hash": "07e7032ab7c7e8134055e06aaa3ebf258642e23d4de90855f314b0d875998722",
+        "calls": [],
+        "imports": []
+      },
+      "after": {
+        "id": "AmsiUacUninitialize",
+        "mangled": "AmsiUacUninitialize",
+        "demangled": null,
+        "rva": 24832,
+        "size": 80,
+        "kind": "CFunc",
+        "exported": true,
+        "signature": "{\"params\":[],\"is_const\":false,\"parse_ok\":false}",
+        "body_hash": "b403e9bacf574ab6e6e9735789b59b308773724bf560fa0318d97d094ad2a71c",
+        "calls": [],
+        "imports": []
+      }
+    },
+    {
+      "id": "AmsiUninitialize",
+      "flags": {
+        "signature": false,
+        "implementation": true,
+        "calls": false,
+        "imports": false,
+        "size": false,
+        "kind": false,
+        "export_status": false,
+        "rva": false
+      },
+      "before": {
+        "id": "AmsiUninitialize",
+        "mangled": "AmsiUninitialize",
+        "demangled": null,
+        "rva": 23840,
+        "size": 80,
+        "kind": "CFunc",
+        "exported": true,
+        "signature": "{\"params\":[],\"is_const\":false,\"parse_ok\":false}",
+        "body_hash": "edaa2b4252bd3101222d7580cb059134b265f8f5d8e53a6ae62a5f63358f71a5",
+        "calls": [],
+        "imports": []
+      },
+      "after": {
+        "id": "AmsiUninitialize",
+        "mangled": "AmsiUninitialize",
+        "demangled": null,
+        "rva": 23840,
+        "size": 80,
+        "kind": "CFunc",
+        "exported": true,
+        "signature": "{\"params\":[],\"is_const\":false,\"parse_ok\":false}",
+        "body_hash": "b02990f397768533ea45d03742283a921013bf18f1c427ab5686d53328277792",
+        "calls": [],
+        "imports": []
+      }
+    },
+    {
+      "id": "DllUnregisterServer",
+      "flags": {
+        "signature": false,
+        "implementation": true,
+        "calls": false,
+        "imports": false,
+        "size": false,
+        "kind": false,
+        "export_status": false,
+        "rva": false
+      },
+      "before": {
+        "id": "DllUnregisterServer",
+        "mangled": "DllUnregisterServer",
+        "demangled": null,
+        "rva": 17824,
+        "size": 5424,
+        "kind": "CFunc",
+        "exported": true,
+        "signature": "{\"params\":[],\"is_const\":false,\"parse_ok\":false}",
+        "body_hash": "241152ab63920282f2ee5270e83fcd56abc01c2ee9cd97bccd3f51ab556685b0",
+        "calls": [],
+        "imports": []
+      },
+      "after": {
+        "id": "DllUnregisterServer",
+        "mangled": "DllUnregisterServer",
+        "demangled": null,
+        "rva": 17824,
+        "size": 5424,
+        "kind": "CFunc",
+        "exported": true,
+        "signature": "{\"params\":[],\"is_const\":false,\"parse_ok\":false}",
+        "body_hash": "f8f4b218c2444ec4cb1bdd2ed537712cc2fec4af1f9e2ccb1f85c092a15a9900",
+        "calls": [],
+        "imports": []
+      }
+    }
+  ]
+}

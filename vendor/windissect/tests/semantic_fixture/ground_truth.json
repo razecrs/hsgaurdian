@@ -1,0 +1,62 @@
+{
+  "binary_sha256": "75F5C92036C71C9D288A2F646578D31CC5C624E4FF2E7FCF9C0E2D09A8B38DEC",
+  "classes": [
+    {
+      "name": "PrimaryBase",
+      "size": 16,
+      "fields": [
+        { "name": "primary_value", "offset": 8, "width": 4 }
+      ],
+      "vtable_slots": [0]
+    },
+    {
+      "name": "SecondaryBase",
+      "size": 16,
+      "fields": [
+        { "name": "secondary_pointer", "offset": 8, "width": 8 }
+      ],
+      "vtable_slots": [0]
+    },
+    {
+      "name": "Interface",
+      "size": 8,
+      "vtable_slots": [0]
+    },
+    {
+      "name": "SemanticFixture",
+      "size": 64,
+      "fields": [
+        { "name": "payload", "offset": 40, "width": 8 },
+        { "name": "enabled", "offset": 48, "width": 4, "bit_offset": 0, "bit_size": 1 },
+        { "name": "mode", "offset": 48, "width": 4, "bit_offset": 1, "bit_size": 3 },
+        { "name": "reserved", "offset": 48, "width": 4, "bit_offset": 4, "bit_size": 28 },
+        { "name": "callback", "offset": 56, "width": 8 }
+      ],
+      "bases": [
+        { "name": "PrimaryBase", "offset": 0 },
+        { "name": "SecondaryBase", "offset": 16 },
+        { "name": "Interface", "offset": 32 }
+      ],
+      "vtable_slots": [0]
+    },
+    {
+      "name": "SemanticFixture::Payload",
+      "size": 8,
+      "fields": [
+        { "name": "integer", "offset": 0, "width": 8 },
+        { "name": "real", "offset": 0, "width": 8 },
+        { "name": "pointer", "offset": 0, "width": 8 }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "SemanticColor",
+      "values": [
+        { "name": "Red", "value": -1 },
+        { "name": "Green", "value": 2 },
+        { "name": "Blue", "value": 256 }
+      ]
+    }
+  ]
+}

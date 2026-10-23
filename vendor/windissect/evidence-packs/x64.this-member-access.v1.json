@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "id": "x64.this-member-access.dui70.seed",
+  "rule_id": "x64.this-member-access",
+  "rule_version": 1,
+  "maturity": "draft",
+  "tools": [
+    {
+      "tool": "IDA Professional",
+      "version": "9.4",
+      "artifact": "not distributed; observations are keyed by binary hash and instruction RVA"
+    },
+    {
+      "tool": "llvm-objdump",
+      "version": "not recorded"
+    }
+  ],
+  "cases": [
+    {
+      "id": "browser-nonvolatile-this",
+      "kind": "positive",
+      "binary_sha256": "2878ECCC8351F19888DE58271684332F65BC103FC67664436F3DC26C30E16A5F",
+      "binary_file": "dui70.dll",
+      "machine": "x86-64",
+      "symbol": "??0Browser@DirectUI@@QEAA@AEBV01@@Z",
+      "rva": 750864,
+      "conclusion": "RDI is a zero-adjustment alias of this across the Element copy-constructor call; +0xC8 belongs to Browser.",
+      "expected_rule_result": "accept RDI-relative vftable and +0xC8 accesses",
+      "instruction_rvas": [750877, 750878, 750885, 750891]
+    },
+    {
+      "id": "autocliprect-nonvolatile-this",
+      "kind": "positive",
+      "binary_sha256": "2878ECCC8351F19888DE58271684332F65BC103FC67664436F3DC26C30E16A5F",
+      "binary_file": "dui70.dll",
+      "machine": "x86-64",
+      "symbol": "??0AutoClipRect@DirectUI@@QEAA@PEAUHDC__@@PEBUtagRECT@@1@Z",
+      "rva": 617548,
+      "conclusion": "RBX retains this across imported calls and addresses members at +8 and +0x10.",
+      "expected_rule_result": "accept RBX-relative accesses after calls",
+      "instruction_rvas": [617560, 617577, 617584]
+    },
+    {
+      "id": "static-buffer-is-not-this",
+      "kind": "negative",
+      "binary_sha256": "2878ECCC8351F19888DE58271684332F65BC103FC67664436F3DC26C30E16A5F",
+      "binary_file": "dui70.dll",
+      "machine": "x86-64",
+      "symbol": "?IsBufferBinaryDUI@CBinaryXmlReader@DirectUI@@SA_NPEBE_K@Z",
+      "rva": 217808,
+      "conclusion": "RCX is a byte-buffer parameter in this static function, not this.",
+      "expected_rule_result": "reject all RCX-relative member claims",
+      "instruction_rvas": [217814, 217825],
+      "rejected_interpretations": ["CBinaryXmlReader fields at +0 and +4"]
+    },
+    {
+      "id": "volatile-secondary-this-after-call",
+      "kind": "adversarial",
+      "binary_sha256": "2878ECCC8351F19888DE58271684332F65BC103FC67664436F3DC26C30E16A5F",
+      "binary_file": "dui70.dll",
+      "machine": "x86-64",
+      "symbol": "??0CTouchEditInnerTextHost@DirectUI@@QEAA@PEAVTouchEditInner@1@@Z",
+      "rva": 801764,
+      "conclusion": "R8 holds complete this while RCX is adjusted by +8 for a secondary-base constructor, but R8 is volatile across the call.",
+      "expected_rule_result": "withhold post-call R8 claims until callee-clobber or constructor semantics prove preservation",
+      "rejected_interpretations": ["blindly preserve all volatile aliases across calls"]
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-and-verify:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Install Clang for C17/C23/C26 and C++17/20/23/26 checks
+      uses: aminya/setup-cpp@v1
+      with:
+        compiler: llvm
+
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build
+      run: cargo build --verbose
+
+    - name: Rust formatting
+      run: cargo fmt --all -- --check
+
+    - name: Run unit tests
+      run: cargo test --verbose
+
+    - name: Rust lint
+      run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery
+
+    - name: Go orchestration tests
+      run: go test ./...
+
+    - name: Go static analysis
+      run: go vet ./...
+
+  windows-target-independent-demo:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Clang
+      uses: aminya/setup-cpp@v1
+      with:
+        compiler: llvm
+
+    - name: Analyze and verify installed AMSI
+      shell: pwsh
+      run: ./scripts/demo.ps1
+
+    - name: Compile generated C, C++, and Rust outputs
+      shell: pwsh
+      run: |
+        $env:CXX = 'clang++'
+        & 'C:\Program Files\Git\bin\bash.exe' tests/verify_generated.sh target/demo/amsi/amsi.json target/generated-verification amsi
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

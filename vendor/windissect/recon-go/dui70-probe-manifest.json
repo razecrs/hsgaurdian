@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "binary_sha256": "2080e43f5d997a3bd9827f38d8f3029d88f77a7f301966fba10ec0acad9aa556",
+  "timeout_ms": 10000,
+  "operations": [
+    {
+      "kind": "read-rva",
+      "id": "dos-header-probe",
+      "rva": 0,
+      "size": 64
+    }
+  ]
+}

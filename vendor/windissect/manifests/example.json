@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "targets": [
+    {"id": "dwmapi", "file": "dwmapi.dll", "source": "system32", "area": "dwm", "required": true},
+    {"id": "Taskbar.View", "file": "Taskbar.View.dll", "source": "client-core-system-app", "area": "taskbar", "required": false},
+    {"id": "notepad", "file": "Notepad.exe", "source": "notepad-app-x64", "area": "apps", "required": false},
+    {"id": "mydriver", "file": "D:\\samples\\mydriver.sys", "area": "custom", "required": false}
+  ]
+}

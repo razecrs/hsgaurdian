@@ -16,8 +16,8 @@ use windows_sys::Win32::{
             PAGE_NOACCESS, VirtualProtectEx, VirtualQueryEx,
         },
         Threading::{
-            OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ,
-            PROCESS_VM_WRITE,
+            IsWow64Process2, OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION,
+            PROCESS_VM_READ, PROCESS_VM_WRITE,
         },
     },
 };
@@ -104,6 +104,19 @@ impl ProcessMemory {
 
         bytes.truncate(bytes_read);
         Ok(bytes)
+    }
+
+    pub fn bitness(&self) -> u32 {
+        let mut process_machine = 0u16;
+        let mut native_machine = 0u16;
+        let succeeded =
+            unsafe { IsWow64Process2(self.handle.0, &mut process_machine, &mut native_machine) }
+                != 0;
+        if succeeded && process_machine != 0 {
+            32
+        } else {
+            usize::BITS
+        }
     }
 
     pub fn scan_exact(
