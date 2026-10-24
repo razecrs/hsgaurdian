@@ -518,7 +518,7 @@ pub fn default_executable() -> PathBuf {
             let release = PathBuf::from(r"D:\Projects\windissect\target\release\windissect.exe");
             release.exists().then_some(release)
         })
-        .unwrap_or_else(|| PathBuf::from("windissect.exe"))
+        .unwrap_or_else(|| PathBuf::from("./windissect.exe"))
 }
 
 #[cfg(test)]
